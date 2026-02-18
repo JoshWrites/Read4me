@@ -12,16 +12,67 @@ Usage:
 
 from __future__ import annotations
 
+import multiprocessing as _mp
 import os
 import sys
 import threading
 from pathlib import Path
 
-# Prevent HuggingFace tokenizer and OpenMP from forking worker processes.
-# When running inside Textual's event loop those forks inherit the terminal
-# file descriptors and fail with "bad value(s) in fds_to_keep" on Python 3.12+.
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
+# ── Generation worker ─────────────────────────────────────────────────────────
+#
+# WHY A SEPARATE PROCESS?
+#
+# Textual replaces sys.stdout with an in-memory buffer (so random print()
+# calls don't trash the UI).  Its fake stdout returns -1 for fileno().
+# Python 3.12+ validates every file-descriptor in the "keep open" list before
+# any subprocess.Popen call; hitting -1 raises:
+#   ValueError: bad value(s) in fds_to_keep
+#
+# The fix: spawn the generation worker BEFORE Textual starts.  At that point
+# sys.stdout is a real terminal FD, so all subprocess spawns inside the model
+# pipeline (ONNX Runtime, ffmpeg probes, tokenizer workers, …) work cleanly.
+# The worker is idle until a job arrives via a multiprocessing.Queue.
+
+def _worker_main(job_q: "_mp.Queue[dict | None]",
+                 result_q: "_mp.Queue[dict]",
+                 repo_root: str) -> None:
+    """Entry point for the generation worker process."""
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    sys.path.insert(0, repo_root)
+    sys.path.insert(0, os.path.join(repo_root, "src"))
+
+    while True:
+        job = job_q.get()
+        if job is None:          # shutdown signal
+            break
+        try:
+            from src.generate import generate  # imported lazily — model caches after first call
+            out = generate(**job)
+            result_q.put({"ok": True, "path": out})
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+            result_q.put({"ok": False, "error": str(exc),
+                          "traceback": traceback.format_exc()})
+
+
+# Queues and process are created at import time but the process is not
+# started until main() so that 'spawn' forks before Textual touches the FDs.
+_mp_ctx   = _mp.get_context("spawn")
+_job_q    = _mp_ctx.Queue()
+_result_q = _mp_ctx.Queue()
+_gen_worker: "_mp.Process | None" = None   # started in main()
+
+
+def _start_worker(repo_root: str) -> None:
+    global _gen_worker
+    _gen_worker = _mp_ctx.Process(
+        target=_worker_main,
+        args=(_job_q, _result_q, repo_root),
+        daemon=True,
+        name="Read4me-GenerationWorker",
+    )
+    _gen_worker.start()
 
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.join(_REPO_ROOT, "src")
@@ -502,34 +553,22 @@ class Read4meApp(App):
         self.query_one("#generate-btn", Button).disabled = True
 
         def _run() -> None:
-            # Ensure subprocess-forking libraries stay single-threaded inside
-            # the Textual event loop (belt-and-suspenders alongside the module-
-            # level os.environ.setdefault calls at the top of this file).
-            os.environ["TOKENIZERS_PARALLELISM"] = "false"
-            os.environ["OMP_NUM_THREADS"] = "1"
-            try:
-                from src.generate import generate
-                out = generate(
-                    text=text,
-                    voice_path=voice_path,
-                    output_dir=output_dir,
-                    engine_name=engine_name,
-                    device=device,
-                    **engine_params,
-                )
-                self.call_from_thread(self._on_generation_done, out, None)
-            except ValueError as exc:
-                # "bad value(s) in fds_to_keep" and similar process-spawn errors
-                if "fds_to_keep" in str(exc):
-                    msg = (
-                        "Subprocess fork conflict — model loaded but generation "
-                        "failed.  Try running: python text_to_speech.py instead."
-                    )
-                else:
-                    msg = str(exc)
-                self.call_from_thread(self._on_generation_done, None, msg)
-            except Exception as exc:  # noqa: BLE001
-                self.call_from_thread(self._on_generation_done, None, str(exc))
+            # Send the job to the pre-spawned worker process.
+            # That process was born before Textual started, so sys.stdout is a
+            # real FD there — any subprocess it needs to spawn works cleanly.
+            _job_q.put({
+                "text": text,
+                "voice_path": voice_path,
+                "output_dir": output_dir,
+                "engine_name": engine_name,
+                "device": device,
+                **engine_params,
+            })
+            result = _result_q.get()   # blocks until the worker finishes
+            if result["ok"]:
+                self.call_from_thread(self._on_generation_done, result["path"], None)
+            else:
+                self.call_from_thread(self._on_generation_done, None, result["error"])
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -553,4 +592,9 @@ class Read4meApp(App):
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Start the worker BEFORE app.run() so the child process inherits a clean
+    # sys.stdout (real terminal FD).  Once Textual starts it replaces stdout
+    # with an in-memory buffer — any process spawned after that point gets
+    # fileno() == -1 and fails with "bad value(s) in fds_to_keep".
+    _start_worker(_REPO_ROOT)
     Read4meApp().run()
