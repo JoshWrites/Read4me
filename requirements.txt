@@ -9,6 +9,7 @@ soundfile>=0.12.1       # WAV file output
 # Model hub & format
 huggingface_hub>=0.20.0
 safetensors>=0.4.0
+transformers>=4.40.0
 
 # Audio processing (librosa optional — falls back to torchaudio)
 librosa>=0.10.0
