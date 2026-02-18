@@ -21,6 +21,7 @@ _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.join(_REPO_ROOT, "src")
 _SCRIPTS_DIR = os.path.join(_REPO_ROOT, "scripts")
 _VOICES_DIR = os.path.join(_REPO_ROOT, "voices")
+_OUTPUT_DIR = os.path.join(_REPO_ROOT, "Output")
 
 for _p in (_REPO_ROOT, _SRC):
     if _p not in sys.path:
@@ -180,7 +181,7 @@ class Read4meApp(App):
         super().__init__()
         self._script_path: str | None = None
         self._voice_path:  str | None = None
-        self._output_dir:  str = _REPO_ROOT
+        self._output_dir:  str = _OUTPUT_DIR
         self._generating:  bool = False
         self._current_engine: str | None = None
         self._dom_ready: bool = False  # True only after on_mount — guards Select.Changed
@@ -229,7 +230,7 @@ class Read4meApp(App):
             yield Label("Output Directory", classes="section-label")
             with Horizontal(classes="file-row"):
                 yield Static(
-                    _REPO_ROOT, id="outdir-display", classes="path-display",
+                    _OUTPUT_DIR, id="outdir-display", classes="path-display",
                 )
                 yield Button("Browse", id="browse-outdir", classes="browse-btn")
 

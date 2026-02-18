@@ -17,7 +17,9 @@ env/
 # Downloaded model weights (large files — fetched from HuggingFace on first use)
 /models/
 
-# Output audio files
+# Output audio files (keep the Output/ directory itself, ignore its contents)
+Output/*
+!Output/.gitkeep
 *.wav
 *.mp3
 *.flac

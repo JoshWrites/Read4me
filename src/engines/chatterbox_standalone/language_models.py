@@ -10,8 +10,8 @@ from typing import Dict, List, Tuple, Optional
 # ChatterBox model configurations
 CHATTERBOX_MODELS = {
     "English": {
-        "repo": "ResembleAI/chatterbox", 
-        "format": "pt",
+        "repo": "ResembleAI/chatterbox",
+        "format": "safetensors",
         "description": "Original English ChatterBox model"
     },
     "German": {
