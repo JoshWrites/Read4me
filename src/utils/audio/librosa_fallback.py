@@ -1,9 +1,11 @@
 """
-LibROSA Fallback Functions for Python 3.13 Compatibility
+Audio loading/processing utilities.
 
-This module provides fallback implementations for librosa functions that fail on Python 3.13
-due to numba compatibility issues. It tries librosa first, then falls back to torchaudio/numpy
-implementations if librosa fails.
+torchaudio is used as the primary backend because it relies on compiled C
+library bindings (no subprocess spawning).  librosa is tried first only for
+the resampling and DSP helpers where quality matters, but safe_load always
+goes through torchaudio to avoid audioread's subprocess.Popen([ffmpeg...])
+backend-probe, which fails inside a Textual TUI event loop on Python 3.12+.
 """
 
 import sys
@@ -15,38 +17,53 @@ import warnings
 
 def safe_load(file_path, sr=None, mono=True):
     """
-    Safe audio loading with librosa fallback to torchaudio
-    
+    Load an audio file and return (numpy_array, sample_rate).
+
+    Backend priority (each avoids subprocess.Popen so they are safe inside a
+    Textual TUI event loop):
+      1. soundfile  — C library, supports WAV/MP3/FLAC/OGG/etc.
+      2. torchaudio — C++ bindings, good fallback for soundfile gaps
+      3. librosa    — last resort; internally calls audioread which probes
+                      for ffmpeg via subprocess and will fail inside a TUI
+
     Args:
         file_path: Path to audio file or BytesIO object
-        sr: Target sample rate (None for original)
-        mono: Convert to mono if True
-    
-    Returns:
-        (audio_array, sample_rate): NumPy array and sample rate
+        sr: Target sample rate (None keeps the original)
+        mono: Convert to mono when True
     """
+    # ── 1. soundfile ──────────────────────────────────────────────────────────
     try:
-        # Try librosa first (best quality)
-        import librosa
-        return librosa.load(file_path, sr=sr, mono=mono)
-    except Exception as e:
-        # Fallback to torchaudio for Python 3.13 compatibility
-        audio_tensor, sample_rate = torchaudio.load(file_path)
-        
-        # Convert to mono if requested
-        if mono and audio_tensor.shape[0] > 1:
-            audio_tensor = torch.mean(audio_tensor, dim=0, keepdim=True)
-        
-        # Resample if needed
+        import soundfile as sf
+        audio, sample_rate = sf.read(str(file_path), always_2d=True, dtype="float32")
+        # soundfile returns (samples, channels); transpose to (channels, samples)
+        audio = audio.T  # → (channels, samples)
+        if mono and audio.shape[0] > 1:
+            audio = audio.mean(axis=0)  # → (samples,)
+        else:
+            audio = audio.squeeze()
         if sr is not None and sample_rate != sr:
-            resampler = torchaudio.transforms.Resample(sample_rate, sr)
-            audio_tensor = resampler(audio_tensor)
+            audio_t = torch.from_numpy(audio).unsqueeze(0) if audio.ndim == 1 else torch.from_numpy(audio)
+            audio = torchaudio.transforms.Resample(sample_rate, sr)(audio_t).squeeze().numpy()
             sample_rate = sr
-        
-        # Convert to numpy and squeeze
-        audio_array = audio_tensor.squeeze().numpy()
-        
-        return audio_array, sample_rate
+        return audio.astype(np.float32), sample_rate
+    except Exception:
+        pass
+
+    # ── 2. torchaudio ─────────────────────────────────────────────────────────
+    try:
+        audio_tensor, sample_rate = torchaudio.load(str(file_path))
+        if mono and audio_tensor.shape[0] > 1:
+            audio_tensor = audio_tensor.mean(dim=0, keepdim=True)
+        if sr is not None and sample_rate != sr:
+            audio_tensor = torchaudio.transforms.Resample(sample_rate, sr)(audio_tensor)
+            sample_rate = sr
+        return audio_tensor.squeeze().numpy().astype(np.float32), sample_rate
+    except Exception:
+        pass
+
+    # ── 3. librosa (last resort — spawns subprocess to probe for ffmpeg) ──────
+    import librosa
+    return librosa.load(file_path, sr=sr, mono=mono)
 
 
 def safe_resample(audio, orig_sr, target_sr, res_type='kaiser_fast'):
