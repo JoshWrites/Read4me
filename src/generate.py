@@ -1,8 +1,8 @@
 """
-Core TTS generation API.
+Core TTS generation API — engine-agnostic.
 
 Both the CLI (text_to_speech.py) and the TUI (tui.py) call this module.
-Neither interface imports from the engine directly.
+Neither interface knows which TTS engine is being used.
 
 Usage:
     from src.generate import generate
@@ -11,91 +11,90 @@ Usage:
         text="Hello world.",
         voice_path="voices/jej2.mp3",
         output_dir=".",
+        engine_name="chatterbox",   # default
+        device="auto",
+        # any engine-specific kwargs:
+        language="English",
+        exaggeration=0.5,
     )
+
+To add a new engine: see src/engines/registry.py.
 """
+
+from __future__ import annotations
 
 import os
 import sys
 
-# Ensure repo root is on the path so `import folder_paths` resolves
+# Ensure repo root and src/ are on sys.path so engine and folder_paths imports resolve
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-
 _SRC = os.path.join(_REPO_ROOT, "src")
-if _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
+for _p in (_REPO_ROOT, _SRC):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 
 def generate(
     text: str,
-    voice_path: str,
+    voice_path: str | None,
     output_dir: str = ".",
-    language: str = "English",
+    engine_name: str = "chatterbox",
     device: str = "auto",
-    exaggeration: float = 0.5,
-    temperature: float = 0.8,
-    cfg_weight: float = 0.5,
     output_filename: str | None = None,
+    **engine_params,
 ) -> str:
     """
-    Generate speech from text using a reference voice and save it as a WAV file.
+    Synthesise speech and write a WAV file.
 
     Args:
-        text:             The text to read aloud.
-        voice_path:       Path to a reference voice file (.wav or .mp3).
-        output_dir:       Directory where the output WAV will be written.
-        language:         Chatterbox language model to use (default: 'English').
+        text:             Text to read aloud.
+        voice_path:       Reference voice file (.wav / .mp3).
+                          May be None if the engine doesn't require one.
+        output_dir:       Directory for the output WAV.
+        engine_name:      Registered engine slug (default: 'chatterbox').
         device:           Torch device — 'auto', 'cuda', 'mps', or 'cpu'.
-        exaggeration:     Emotion exaggeration factor (0.0–1.0+).
-        temperature:      Sampling temperature (higher = more varied).
-        cfg_weight:       Classifier-free guidance weight.
-        output_filename:  Optional explicit filename (without directory).
-                          Defaults to 'output.wav'.
+        output_filename:  Output filename (default: 'output.wav').
+        **engine_params:  Passed to engine.load(), set_voice(), generate_audio().
 
     Returns:
         Absolute path to the written WAV file.
-
-    Raises:
-        FileNotFoundError: If voice_path does not exist.
-        ValueError:        If text is empty.
     """
+    import numpy as np
     import soundfile as sf
-    from engines.chatterbox_standalone import ChatterboxTTS
+    from engines.registry import get_engine
 
-    # Validate inputs
     text = text.strip()
     if not text:
         raise ValueError("text must not be empty")
-    if not os.path.isfile(voice_path):
-        raise FileNotFoundError(f"Voice file not found: {voice_path}")
+
+    engine = get_engine(engine_name)
+
+    if engine.requires_voice_file:
+        if not voice_path or not os.path.isfile(voice_path):
+            raise FileNotFoundError(f"Voice file not found: {voice_path}")
 
     os.makedirs(output_dir, exist_ok=True)
-
-    fname = output_filename or "output.wav"
+    fname = (output_filename or "output.wav")
     if not fname.lower().endswith(".wav"):
         fname += ".wav"
     out_path = os.path.abspath(os.path.join(output_dir, fname))
 
-    print(f"Loading TTS model ({language}, {device})...")
-    tts = ChatterboxTTS.from_pretrained(device, language=language)
+    # Load model (adapter caches; skips if device+params unchanged)
+    engine.load(device, **engine_params)
 
-    print(f"Loading voice reference: {voice_path}")
-    tts.prepare_conditionals(voice_path, exaggeration=exaggeration)
+    # Prepare voice
+    if engine.requires_voice_file:
+        engine.set_voice(voice_path, **engine_params)
 
-    print("Generating speech...")
-    audio = tts.generate(
-        text,
-        audio_prompt_path=None,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        temperature=temperature,
-    )
+    # Generate
+    audio, sr = engine.generate_audio(text, **engine_params)
 
-    wav = audio.squeeze(0).cpu().numpy()
-    sf.write(out_path, wav, tts.sr, subtype="FLOAT")
+    # Normalise to 1-D float32 numpy array
+    if hasattr(audio, "cpu"):                          # torch.Tensor
+        audio = audio.squeeze().detach().cpu().numpy()
+    audio = np.asarray(audio, dtype=np.float32).squeeze()
 
-    duration = len(wav) / tts.sr
-    print(f"Saved: {out_path}  ({tts.sr} Hz, {duration:.1f}s)")
+    sf.write(out_path, audio, sr, subtype="FLOAT")
+    print(f"Saved: {out_path}  ({sr} Hz, {len(audio) / sr:.1f}s)")
 
     return out_path

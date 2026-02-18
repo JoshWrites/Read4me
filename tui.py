@@ -2,192 +2,127 @@
 """
 Read4me — TUI
 
-A Textual-based interface to generate speech from text in a target voice.
+Two-panel interface:
+  LEFT  — script, voice, engine, device, output directory, generate
+  RIGHT — engine-specific settings (dynamic, ◆ marks required fields)
 
 Usage:
     python tui.py
 """
+
+from __future__ import annotations
 
 import os
 import sys
 import threading
 from pathlib import Path
 
-# Ensure repo root is on path
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+_SRC = os.path.join(_REPO_ROOT, "src")
 _SCRIPTS_DIR = os.path.join(_REPO_ROOT, "scripts")
 _VOICES_DIR = os.path.join(_REPO_ROOT, "voices")
 
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+for _p in (_REPO_ROOT, _SRC):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import (
-    Button,
-    DirectoryTree,
-    Footer,
-    Header,
-    Input,
-    Label,
-    Select,
-    Static,
-)
+from textual.widgets import Button, DirectoryTree, Footer, Header, Input, Label, Select, Static
 
 
-# ---------------------------------------------------------------------------
-# File-picker modal
-# ---------------------------------------------------------------------------
+# ── File picker modal ─────────────────────────────────────────────────────────
 
 class FilePicker(ModalScreen):
-    """A modal that lets the user browse and select a file."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss(None)", "Cancel"),
-    ]
+    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
 
     DEFAULT_CSS = """
-    FilePicker {
-        align: center middle;
-    }
+    FilePicker { align: center middle; }
     FilePicker > Vertical {
-        width: 70;
-        height: 30;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
+        width: 72; height: 32;
+        border: thick $primary; background: $surface; padding: 1 2;
     }
-    FilePicker Label {
-        margin-bottom: 1;
-        text-style: bold;
-    }
-    FilePicker DirectoryTree {
-        height: 20;
-        border: solid $panel;
-    }
-    FilePicker Horizontal {
-        height: 3;
-        margin-top: 1;
-        align: right middle;
-    }
+    FilePicker .modal-title { text-style: bold; margin-bottom: 1; }
+    FilePicker DirectoryTree { height: 22; border: solid $panel; }
+    FilePicker .modal-actions { height: 3; margin-top: 1; align: right middle; }
+    FilePicker Button { margin-left: 1; }
     """
 
     def __init__(self, start_path: str, title: str = "Select file") -> None:
         super().__init__()
-        self._start_path = start_path
+        self._start = start_path
         self._title = title
         self._selected: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(self._title)
-            yield DirectoryTree(self._start_path, id="picker-tree")
-            with Horizontal():
-                yield Button("Cancel", variant="default", id="picker-cancel")
-                yield Button("Select", variant="primary", id="picker-select")
+            yield Label(self._title, classes="modal-title")
+            yield DirectoryTree(self._start, id="fp-tree")
+            with Horizontal(classes="modal-actions"):
+                yield Button("Cancel",  variant="default", id="fp-cancel")
+                yield Button("Select",  variant="primary", id="fp-select")
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         self._selected = str(event.path)
-        self.query_one("#picker-select", Button).label = Path(self._selected).name
+        self.query_one("#fp-select", Button).label = f"✔  {Path(self._selected).name}"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "picker-cancel":
-            self.dismiss(None)
-        elif event.button.id == "picker-select":
-            self.dismiss(self._selected)
+        self.dismiss(self._selected if event.button.id == "fp-select" else None)
 
 
-# ---------------------------------------------------------------------------
-# Directory-picker modal
-# ---------------------------------------------------------------------------
+# ── Directory picker modal ────────────────────────────────────────────────────
 
 class DirPicker(ModalScreen):
-    """A modal that lets the user browse and select a directory."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss(None)", "Cancel"),
-    ]
+    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
 
     DEFAULT_CSS = """
-    DirPicker {
-        align: center middle;
-    }
+    DirPicker { align: center middle; }
     DirPicker > Vertical {
-        width: 70;
-        height: 30;
-        border: thick $accent;
-        background: $surface;
-        padding: 1 2;
+        width: 72; height: 32;
+        border: thick $accent; background: $surface; padding: 1 2;
     }
-    DirPicker Label {
-        margin-bottom: 1;
-        text-style: bold;
-    }
-    DirPicker DirectoryTree {
-        height: 20;
-        border: solid $panel;
-    }
-    DirPicker Horizontal {
-        height: 3;
-        margin-top: 1;
-        align: right middle;
-    }
+    DirPicker .modal-title { text-style: bold; margin-bottom: 1; }
+    DirPicker DirectoryTree { height: 22; border: solid $panel; }
+    DirPicker .modal-actions { height: 3; margin-top: 1; align: right middle; }
+    DirPicker Button { margin-left: 1; }
     """
 
     def __init__(self, start_path: str, title: str = "Select directory") -> None:
         super().__init__()
-        self._start_path = start_path
+        self._start = start_path
+        self._current = start_path
         self._title = title
-        self._current_dir: str = start_path
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(self._title)
-            yield DirectoryTree(self._start_path, id="dir-tree")
-            with Horizontal():
-                yield Button("Cancel", variant="default", id="dir-cancel")
-                yield Button("Select this folder", variant="primary", id="dir-select")
+            yield Label(self._title, classes="modal-title")
+            yield DirectoryTree(self._start, id="dp-tree")
+            with Horizontal(classes="modal-actions"):
+                yield Button("Cancel",           variant="default", id="dp-cancel")
+                yield Button("Use this folder",  variant="primary",  id="dp-select")
 
-    def on_directory_tree_directory_selected(
-        self, event: DirectoryTree.DirectorySelected
-    ) -> None:
-        self._current_dir = str(event.path)
+    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        self._current = str(event.path)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "dir-cancel":
-            self.dismiss(None)
-        elif event.button.id == "dir-select":
-            self.dismiss(self._current_dir)
+        self.dismiss(self._current if event.button.id == "dp-select" else None)
 
 
-# ---------------------------------------------------------------------------
-# Main app
-# ---------------------------------------------------------------------------
+# ── Main app ──────────────────────────────────────────────────────────────────
 
-LANGUAGES = [
-    ("English", "English"),
-    ("German", "German"),
-    ("French", "French"),
-    ("Norwegian", "Norwegian"),
-    ("Italian", "Italian"),
-    ("Spanish", "Spanish"),
-]
-
-DEVICES = [
-    ("auto", "auto"),
-    ("cuda", "cuda"),
-    ("mps", "mps"),
-    ("cpu", "cpu"),
+_DEVICES: list[tuple[str, str]] = [
+    ("Auto",  "auto"),
+    ("CUDA",  "cuda"),
+    ("MPS",   "mps"),
+    ("CPU",   "cpu"),
 ]
 
 
 class Read4meApp(App):
-    """Read4me — Text to Speech TUI"""
-
     TITLE = "Read4me"
-    SUB_TITLE = "Text to speech in your target voice"
+    SUB_TITLE = "Text to Speech"
 
     BINDINGS = [
         Binding("ctrl+g", "generate", "Generate", priority=True),
@@ -195,52 +130,44 @@ class Read4meApp(App):
     ]
 
     DEFAULT_CSS = """
-    Read4meApp {
-        background: $background;
+    /* ── Overall layout ─────────────────────────────── */
+    #panels { height: 1fr; }
+
+    #left-panel {
+        width: 42;
+        border-right: solid $panel-darken-2;
+        padding: 1 2;
+        overflow-y: auto;
     }
+    #right-panel {
+        width: 1fr;
+        padding: 1 2;
+        overflow-y: auto;
+    }
+
+    /* ── Shared ─────────────────────────────────────── */
     .section-label {
         text-style: bold;
         color: $accent;
         margin-top: 1;
     }
     .path-display {
+        width: 1fr;
+        height: 3;
         background: $panel;
         border: solid $primary-darken-2;
         padding: 0 1;
-        height: 3;
         content-align: left middle;
+        overflow: hidden;
     }
-    .path-display.unset {
-        color: $text-muted;
-    }
-    .row {
-        height: auto;
-        margin-bottom: 1;
-    }
-    .browse-btn {
-        width: 12;
-        margin-left: 1;
-    }
-    .param-row {
-        height: 3;
-        margin-bottom: 1;
-    }
-    .param-label {
-        width: 20;
-        content-align: left middle;
-    }
-    .param-input {
-        width: 10;
-    }
-    #main-scroll {
-        height: 1fr;
-        padding: 1 2;
-    }
-    #generate-btn {
-        margin-top: 1;
-        width: 100%;
-        height: 3;
-    }
+    .path-display.unset { color: $text-muted; }
+    .file-row { height: 3; margin-bottom: 1; }
+    .browse-btn { width: 10; margin-left: 1; }
+
+    /* ── Left panel specifics ────────────────────────── */
+    #engine-select { margin-bottom: 1; }
+    #device-select { margin-bottom: 1; }
+    #generate-btn  { width: 100%; height: 3; margin-top: 1; }
     #status {
         height: 3;
         margin-top: 1;
@@ -248,114 +175,254 @@ class Read4meApp(App):
         border: solid $panel-darken-1;
         padding: 0 1;
         content-align: left middle;
+        color: $text-muted;
     }
+    #status.busy   { color: $warning; }
+    #status.done   { color: $success; }
+    #status.error  { color: $error; }
+
+    /* ── Right panel — engine params ─────────────────── */
+    .engine-title {
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+    }
+    .required-header {
+        color: $error;
+        text-style: bold;
+        margin-top: 1;
+        margin-bottom: 0;
+    }
+    .optional-header {
+        color: $text-muted;
+        text-style: bold;
+        margin-top: 1;
+        margin-bottom: 0;
+    }
+    .param-label         { margin-top: 1; }
+    .param-label.required { color: $error; text-style: bold; }
+    .param-desc {
+        color: $text-muted;
+        margin-bottom: 0;
+    }
+    .param-input  { margin-bottom: 0; }
+    .param-select { margin-bottom: 0; }
+    .no-params    { color: $text-muted; margin-top: 1; }
     """
 
     def __init__(self) -> None:
         super().__init__()
         self._script_path: str | None = None
-        self._voice_path: str | None = None
-        self._output_dir: str = _REPO_ROOT
-        self._generating: bool = False
+        self._voice_path:  str | None = None
+        self._output_dir:  str = _REPO_ROOT
+        self._generating:  bool = False
 
-    # ---- Layout ----------------------------------------------------------
+    # ── Layout ───────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
+        from engines.registry import available_engines
+        engines = available_engines()
+        default_engine = engines[0][1] if engines else ""
+
         yield Header()
-        with ScrollableContainer(id="main-scroll"):
-            # Script file
-            yield Label("1. Script file", classes="section-label")
-            with Horizontal(classes="row"):
-                yield Static(
-                    "No file selected — browse scripts/",
-                    id="script-display",
-                    classes="path-display unset",
-                )
-                yield Button("Browse", id="browse-script", classes="browse-btn")
+        with Horizontal(id="panels"):
 
-            # Voice file
-            yield Label("2. Voice file", classes="section-label")
-            with Horizontal(classes="row"):
-                yield Static(
-                    "No file selected — browse voices/",
-                    id="voice-display",
-                    classes="path-display unset",
-                )
-                yield Button("Browse", id="browse-voice", classes="browse-btn")
+            # ── Left panel ────────────────────────────────────────────────
+            with Vertical(id="left-panel"):
+                yield Label("Script", classes="section-label")
+                with Horizontal(classes="file-row"):
+                    yield Static(
+                        "browse scripts/  →",
+                        id="script-display", classes="path-display unset",
+                    )
+                    yield Button("Browse", id="browse-script", classes="browse-btn")
 
-            # Settings
-            yield Label("3. Settings  (optional)", classes="section-label")
-            with Horizontal(classes="row"):
-                yield Label("Language", classes="slider-label")
-                yield Select(LANGUAGES, value="English", id="language-select")
-            with Horizontal(classes="row"):
-                yield Label("Device", classes="slider-label")
-                yield Select(DEVICES, value="auto", id="device-select")
+                with Vertical(id="voice-section"):
+                    yield Label("Voice", classes="section-label")
+                    with Horizontal(classes="file-row"):
+                        yield Static(
+                            "browse voices/  →",
+                            id="voice-display", classes="path-display unset",
+                        )
+                        yield Button("Browse", id="browse-voice", classes="browse-btn")
 
-            with Horizontal(classes="param-row"):
-                yield Label("Exaggeration  (0–1.5)", classes="param-label")
-                yield Input("0.5", id="exaggeration-input", classes="param-input")
+                yield Label("Engine", classes="section-label")
+                yield Select(engines, value=default_engine, id="engine-select")
 
-            with Horizontal(classes="param-row"):
-                yield Label("Temperature  (0.1–1.5)", classes="param-label")
-                yield Input("0.8", id="temperature-input", classes="param-input")
+                yield Label("Device", classes="section-label")
+                yield Select(_DEVICES, value="auto", id="device-select")
 
-            with Horizontal(classes="param-row"):
-                yield Label("CFG Weight  (0–1)", classes="param-label")
-                yield Input("0.5", id="cfg-input", classes="param-input")
+                yield Label("Output Directory", classes="section-label")
+                with Horizontal(classes="file-row"):
+                    yield Static(
+                        _REPO_ROOT, id="outdir-display", classes="path-display",
+                    )
+                    yield Button("Browse", id="browse-outdir", classes="browse-btn")
 
-            # Output directory
-            yield Label("4. Output directory", classes="section-label")
-            with Horizontal(classes="row"):
-                yield Static(
-                    _REPO_ROOT, id="outdir-display", classes="path-display"
-                )
-                yield Button("Browse", id="browse-outdir", classes="browse-btn")
+                yield Button("⚡  Generate  [Ctrl+G]", id="generate-btn", variant="success")
+                yield Static("Ready.", id="status")
 
-            # Generate
-            yield Label("5. Generate", classes="section-label")
-            yield Button(
-                "Generate  [Ctrl+G]",
-                id="generate-btn",
-                variant="success",
-            )
-            yield Static("Ready.", id="status")
+            # ── Right panel — populated in on_mount ───────────────────────
+            with Vertical(id="right-panel"):
+                pass
 
         yield Footer()
 
-    # ---- File/dir pickers ------------------------------------------------
+    def on_mount(self) -> None:
+        from engines.registry import available_engines
+        engines = available_engines()
+        if engines:
+            self._refresh_engine_panel(engines[0][1])
+
+    # ── Engine panel ─────────────────────────────────────────────────────────
+
+    def _refresh_engine_panel(self, engine_name: str) -> None:
+        from engines.registry import get_engine
+        engine = get_engine(engine_name)
+
+        panel = self.query_one("#right-panel")
+        for child in list(panel.children):
+            child.remove()
+
+        # Show/hide voice section based on engine capability
+        self.query_one("#voice-section").display = engine.requires_voice_file
+
+        for widget in self._build_param_widgets(engine):
+            panel.mount(widget)
+
+    def _build_param_widgets(self, engine) -> list:
+        widgets: list = []
+        all_params = engine.params()
+
+        widgets.append(Label(engine.display_name, classes="engine-title"))
+
+        if not all_params:
+            widgets.append(Static("No configurable parameters.", classes="no-params"))
+            return widgets
+
+        required = [p for p in all_params if p.required]
+        optional = [p for p in all_params if not p.required]
+
+        if required:
+            widgets.append(Label("◆  Required", classes="required-header"))
+            for param in required:
+                widgets.extend(self._build_param_row(param))
+
+        if optional:
+            widgets.append(Label("Settings", classes="optional-header"))
+            for param in optional:
+                widgets.extend(self._build_param_row(param))
+
+        return widgets
+
+    def _build_param_row(self, param) -> list:
+        from engines.base import EngineParam
+        widgets: list = []
+        widget_id = f"param-{param.id}"
+
+        # Label — ◆ prefix for required
+        prefix = "◆  " if param.required else ""
+        label_classes = "param-label" + (" required" if param.required else "")
+        widgets.append(Label(f"{prefix}{param.label}", classes=label_classes))
+
+        # Input widget
+        if param.type == "select" and param.options:
+            widgets.append(
+                Select(
+                    options=param.options,
+                    value=param.default,
+                    id=widget_id,
+                    classes="param-select",
+                )
+            )
+        else:
+            range_hint = (
+                f"  ({param.min_val} – {param.max_val})"
+                if param.min_val is not None and param.max_val is not None
+                else ""
+            )
+            placeholder = f"required{range_hint}" if param.required else range_hint.strip()
+            default_val  = "" if param.required else str(param.default)
+            widgets.append(
+                Input(
+                    value=default_val,
+                    placeholder=placeholder,
+                    id=widget_id,
+                    classes="param-input",
+                )
+            )
+
+        # Description hint
+        if param.description:
+            widgets.append(Static(param.description, classes="param-desc"))
+
+        return widgets
+
+    # ── Collect param values from right panel ─────────────────────────────────
+
+    def _collect_engine_params(self, engine_name: str) -> dict:
+        from engines.registry import get_engine
+        engine = get_engine(engine_name)
+        result: dict = {}
+
+        for param in engine.params():
+            widget_id = f"param-{param.id}"
+            try:
+                if param.type == "select":
+                    val = self.query_one(f"#{widget_id}", Select).value
+                    result[param.id] = (
+                        str(val) if val != Select.BLANK else param.default
+                    )
+                else:
+                    raw = self.query_one(f"#{widget_id}", Input).value.strip()
+                    if raw:
+                        if param.type == "float":
+                            result[param.id] = float(raw)
+                        elif param.type == "int":
+                            result[param.id] = int(raw)
+                        else:
+                            result[param.id] = raw
+                    elif param.required:
+                        raise ValueError(f"'{param.label}' is required but not set.")
+                    else:
+                        result[param.id] = param.default
+            except (ValueError, TypeError) as exc:
+                if param.required:
+                    raise
+                result[param.id] = param.default
+
+        return result
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "engine-select" and event.value != Select.BLANK:
+            self._refresh_engine_panel(str(event.value))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        btn_id = event.button.id
-
-        if btn_id == "browse-script":
+        bid = event.button.id
+        if bid == "browse-script":
             self.push_screen(
                 FilePicker(
                     start_path=_SCRIPTS_DIR if os.path.isdir(_SCRIPTS_DIR) else _REPO_ROOT,
-                    title="Select script file (.txt / .md)",
+                    title="Select script file  (.txt / .md)",
                 ),
                 callback=self._on_script_selected,
             )
-
-        elif btn_id == "browse-voice":
+        elif bid == "browse-voice":
             self.push_screen(
                 FilePicker(
                     start_path=_VOICES_DIR if os.path.isdir(_VOICES_DIR) else _REPO_ROOT,
-                    title="Select voice file (.wav / .mp3)",
+                    title="Select voice file  (.wav / .mp3)",
                 ),
                 callback=self._on_voice_selected,
             )
-
-        elif btn_id == "browse-outdir":
+        elif bid == "browse-outdir":
             self.push_screen(
-                DirPicker(
-                    start_path=self._output_dir,
-                    title="Select output directory",
-                ),
+                DirPicker(start_path=self._output_dir, title="Select output directory"),
                 callback=self._on_outdir_selected,
             )
-
-        elif btn_id == "generate-btn":
+        elif bid == "generate-btn":
             self.action_generate()
 
     def _on_script_selected(self, path: str | None) -> None:
@@ -377,69 +444,71 @@ class Read4meApp(App):
             self._output_dir = path
             self.query_one("#outdir-display", Static).update(path)
 
-    # ---- Generation ------------------------------------------------------
+    # ── Generation ────────────────────────────────────────────────────────────
 
     def action_generate(self) -> None:
         if self._generating:
-            self._set_status("Already generating — please wait...")
+            self._set_status("Already generating — please wait.", kind="busy")
             return
 
         if not self._script_path:
-            self._set_status("Please select a script file first.")
-            return
-        if not self._voice_path:
-            self._set_status("Please select a voice file first.")
+            self._set_status("Select a script file first.", kind="error")
             return
 
-        # Read text from the script file
+        engine_val = self.query_one("#engine-select", Select).value
+        if engine_val == Select.BLANK:
+            self._set_status("Select an engine.", kind="error")
+            return
+        engine_name = str(engine_val)
+
+        from engines.registry import get_engine
+        engine = get_engine(engine_name)
+
+        if engine.requires_voice_file and not self._voice_path:
+            self._set_status("Select a voice file first.", kind="error")
+            return
+
         try:
-            with open(self._script_path, encoding="utf-8") as f:
-                text = f.read().strip()
+            with open(self._script_path, encoding="utf-8") as fh:
+                text = fh.read().strip()
         except OSError as exc:
-            self._set_status(f"Could not read script: {exc}")
+            self._set_status(f"Could not read script: {exc}", kind="error")
             return
 
         if not text:
-            self._set_status("Script file is empty.")
+            self._set_status("Script file is empty.", kind="error")
             return
 
-        # Collect settings
-        language = self.query_one("#language-select", Select).value
-        device   = self.query_one("#device-select", Select).value
+        try:
+            engine_params = self._collect_engine_params(engine_name)
+        except ValueError as exc:
+            self._set_status(str(exc), kind="error")
+            return
 
-        def _float(widget_id: str, default: float) -> float:
-            try:
-                return float(self.query_one(f"#{widget_id}", Input).value)
-            except (ValueError, TypeError):
-                return default
+        device_val = self.query_one("#device-select", Select).value
+        device = str(device_val) if device_val != Select.BLANK else "auto"
 
-        exaggeration = _float("exaggeration-input", 0.5)
-        temperature  = _float("temperature-input", 0.8)
-        cfg_weight   = _float("cfg-input", 0.5)
-
+        # Snapshot mutable state before handing off to the thread
         voice_path = self._voice_path
         output_dir = self._output_dir
 
         self._generating = True
-        self._set_status("Generating… this may take a while.")
+        self._set_status("Generating…  this may take a while.", kind="busy")
         self.query_one("#generate-btn", Button).disabled = True
 
-        # Run in background thread so the TUI stays responsive
-        def _run():
+        def _run() -> None:
             try:
                 from src.generate import generate
-                out_path = generate(
+                out = generate(
                     text=text,
                     voice_path=voice_path,
                     output_dir=output_dir,
-                    language=language,
+                    engine_name=engine_name,
                     device=device,
-                    exaggeration=exaggeration,
-                    temperature=temperature,
-                    cfg_weight=cfg_weight,
+                    **engine_params,
                 )
-                self.call_from_thread(self._on_generation_done, out_path, None)
-            except Exception as exc:
+                self.call_from_thread(self._on_generation_done, out, None)
+            except Exception as exc:  # noqa: BLE001
                 self.call_from_thread(self._on_generation_done, None, str(exc))
 
         threading.Thread(target=_run, daemon=True).start()
@@ -448,15 +517,20 @@ class Read4meApp(App):
         self._generating = False
         self.query_one("#generate-btn", Button).disabled = False
         if error:
-            self._set_status(f"Error: {error}")
+            self._set_status(f"Error: {error}", kind="error")
         else:
-            self._set_status(f"Done!  Saved to: {out_path}")
+            self._set_status(f"Done →  {out_path}", kind="done")
 
-    def _set_status(self, msg: str) -> None:
-        self.query_one("#status", Static).update(msg)
+    def _set_status(self, msg: str, kind: str = "") -> None:
+        w = self.query_one("#status", Static)
+        w.update(msg)
+        for cls in ("busy", "done", "error"):
+            w.remove_class(cls)
+        if kind:
+            w.add_class(kind)
 
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     Read4meApp().run()
