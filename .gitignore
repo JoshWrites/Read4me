@@ -14,8 +14,8 @@ venv/
 .venv/
 env/
 
-# Models (large files — download on first use)
-models/
+# Downloaded model weights (large files — fetched from HuggingFace on first use)
+/models/
 
 # Output audio files
 *.wav
