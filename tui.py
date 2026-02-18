@@ -130,88 +130,50 @@ class Read4meApp(App):
     ]
 
     DEFAULT_CSS = """
-    /* ── Overall layout ─────────────────────────────── */
+    /* Every widget stacks naturally; nothing expands to fill space */
+    #main-scroll { height: 1fr; padding: 0 3; }
 
-    /* Single scrollable column — nothing ever gets clipped */
-    #main-scroll {
-        height: 1fr;
-    }
+    .section-label { text-style: bold; color: $accent; height: 1; margin-top: 1; }
 
-    /* All content is a direct child of the VerticalScroll */
-    #main-scroll {
-        padding: 1 3;
-    }
-
-    .divider {
-        border-top: solid $panel-darken-2;
-        height: 1;
-        margin-top: 1;
-        margin-bottom: 1;
-    }
-
-    /* ── Shared ─────────────────────────────────────── */
-    .section-label {
-        text-style: bold;
-        color: $accent;
-        margin-top: 1;
-    }
+    /* File rows: fixed height, browse button flush right */
+    .file-row    { height: 3; margin-bottom: 1; }
     .path-display {
-        width: 1fr;
-        height: 3;
-        background: $panel;
-        border: solid $primary-darken-2;
-        padding: 0 1;
-        content-align: left middle;
-        overflow: hidden;
+        width: 1fr; height: 3;
+        background: $panel; border: solid $primary-darken-2;
+        padding: 0 1; content-align: left middle; overflow: hidden;
     }
     .path-display.unset { color: $text-muted; }
-    .file-row  { height: 3; margin-bottom: 1; }
-    .browse-btn { width: 10; margin-left: 1; }
+    .browse-btn { width: 10; height: 3; margin-left: 1; }
 
-    /* Engine + Device side-by-side row */
-    .eng-dev-row { height: auto; margin-bottom: 1; }
-    .eng-dev-col { width: 1fr; margin-right: 2; }
-    .eng-dev-col:last-of-type { margin-right: 0; }
+    /* Engine + Device row: each column fixed height */
+    .eng-dev-row { height: 6; margin-bottom: 1; }
+    .eng-dev-col { width: 1fr; height: 6; }
 
-    /* ── Top panel specifics ─────────────────────────── */
+    /* Generate button and status */
     #generate-btn { width: 100%; height: 3; margin-top: 1; }
     #status {
-        height: 3;
-        margin-top: 1;
-        background: $panel;
-        border: solid $panel-darken-1;
-        padding: 0 1;
-        content-align: left middle;
-        color: $text-muted;
+        height: 3; margin-top: 1;
+        background: $panel; border: solid $panel-darken-1;
+        padding: 0 1; content-align: left middle; color: $text-muted;
     }
     #status.busy  { color: $warning; }
     #status.done  { color: $success; }
     #status.error { color: $error; }
 
-    /* ── Bottom panel — engine params ────────────────── */
-    .engine-title {
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 1;
-    }
-    .required-header {
-        color: $error;
-        text-style: bold;
-        margin-top: 1;
-        margin-bottom: 0;
-    }
-    .optional-header {
-        color: $text-muted;
-        text-style: bold;
-        margin-top: 1;
-        margin-bottom: 0;
-    }
-    .param-label          { margin-top: 1; }
+    /* Section divider */
+    .divider { height: 1; margin-top: 1; color: $panel-darken-2; }
+
+    /* Engine param panel */
+    #bottom-panel  { height: auto; }
+    .engine-title  { text-style: bold; color: $accent; height: 1; margin-top: 1; }
+    .required-header { color: $error; text-style: bold; height: 1; margin-top: 1; }
+    .optional-header { color: $text-muted; text-style: bold; height: 1; margin-top: 1; }
+    .param-label   { height: 1; margin-top: 1; }
     .param-label.required { color: $error; text-style: bold; }
-    .param-desc  { color: $text-muted; margin-bottom: 0; }
-    .param-input  { margin-bottom: 0; }
-    .param-select { margin-bottom: 0; }
-    .no-params    { color: $text-muted; margin-top: 1; }
+    .param-desc    { height: 1; color: $text-muted; }
+    .param-input   { height: 3; }
+    .param-select  { height: 3; }
+    .no-params     { height: 1; color: $text-muted; margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -245,15 +207,14 @@ class Read4meApp(App):
                 )
                 yield Button("Browse", id="browse-script", classes="browse-btn")
 
-            # ── Voice (shown/hidden per engine) ───────────────────────────
-            with Vertical(id="voice-section"):
-                yield Label("Voice", classes="section-label")
-                with Horizontal(classes="file-row"):
-                    yield Static(
-                        "browse voices/  →",
-                        id="voice-display", classes="path-display unset",
-                    )
-                    yield Button("Browse", id="browse-voice", classes="browse-btn")
+            # ── Voice (each element tagged so show/hide needs no wrapper) ───
+            yield Label("Voice", classes="section-label voice-row")
+            with Horizontal(classes="file-row voice-row"):
+                yield Static(
+                    "browse voices/  →",
+                    id="voice-display", classes="path-display unset",
+                )
+                yield Button("Browse", id="browse-voice", classes="browse-btn")
 
             # ── Engine + Device ───────────────────────────────────────────
             with Horizontal(classes="eng-dev-row"):
@@ -307,8 +268,9 @@ class Read4meApp(App):
             for child in list(panel.children):
                 child.remove()
 
-        # Show/hide voice section depending on whether this engine needs one
-        self.query_one("#voice-section").display = engine.requires_voice_file
+        # Show/hide voice rows depending on whether this engine needs one
+        for w in self.query(".voice-row"):
+            w.display = engine.requires_voice_file
 
         for widget in self._build_param_widgets(engine):
             panel.mount(widget)
