@@ -222,6 +222,7 @@ class Read4meApp(App):
         self._voice_path:  str | None = None
         self._output_dir:  str = _REPO_ROOT
         self._generating:  bool = False
+        self._current_engine: str | None = None  # guard against double-mount
 
     # ── Layout ───────────────────────────────────────────────────────────────
 
@@ -288,12 +289,24 @@ class Read4meApp(App):
     # ── Engine panel ─────────────────────────────────────────────────────────
 
     def _refresh_engine_panel(self, engine_name: str) -> None:
+        # Textual fires Select.Changed when the initial value is set during
+        # compose, so on_mount and on_select_changed both call this for the
+        # same engine.  Skip the second call to avoid DuplicateIds errors.
+        if engine_name == self._current_engine:
+            return
+        self._current_engine = engine_name
+
         from engines.registry import get_engine
         engine = get_engine(engine_name)
 
         panel = self.query_one("#bottom-panel")
-        for child in list(panel.children):
-            child.remove()
+        # remove_children() is the synchronous Textual 8 API; fall back to
+        # iterating if the method isn't present on older builds.
+        try:
+            panel.remove_children()
+        except AttributeError:
+            for child in list(panel.children):
+                child.remove()
 
         # Show/hide voice section based on engine capability
         self.query_one("#voice-section").display = engine.requires_voice_file
@@ -408,7 +421,11 @@ class Read4meApp(App):
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "engine-select" and event.value != Select.BLANK:
-            self._refresh_engine_panel(str(event.value))
+            new_engine = str(event.value)
+            if new_engine != self._current_engine:
+                # User picked a different engine — force the panel to rebuild
+                self._current_engine = None
+            self._refresh_engine_panel(new_engine)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id
