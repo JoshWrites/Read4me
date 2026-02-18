@@ -84,17 +84,54 @@ The CLI and TUI will pick it up automatically.
 
 ---
 
-## 2. Repository Layout
+## 2. Paralinguistic Tags (Chatterbox Turbo)
+
+`chatterbox-turbo` supports inline vocal-reaction tags embedded directly in
+the script text.  The model performs these naturally in the cloned voice —
+no post-processing or audio splicing is required.
+
+### Supported tags
+
+| Tag | Effect |
+|-----|--------|
+| `[laugh]` | Full laugh |
+| `[chuckle]` | Soft, quiet laugh |
+| `[sigh]` | Exhaled breath |
+| `[gasp]` | Sharp intake of breath / surprise |
+| `[cough]` | Realistic cough |
+| `[groan]` | Low vocal discomfort |
+| `[sniff]` | Nasal inhalation |
+| `[clear throat]` | Throat-clearing sound |
+
+### Usage in scripts
+
+```
+And that's the quarterly report.[sigh] Any questions?
+
+I just wanted to say — [chuckle] — you were right all along.
+```
+
+### Chunker rule — do NOT split inside a tag
+
+`src/generate.py` splits long texts into sentence chunks before generation.
+When modifying `_split_sentences` or `_chunk_text`, ensure the regex does
+**not** insert a chunk boundary inside a `[...]` tag.  The safest approach is
+to treat the entire bracketed expression as a single non-splittable token.
+
+---
+
+## 3. Repository Layout
 
 ```
 Read4me/
 ├── src/
 │   ├── engines/
-│   │   ├── canonical.py          ← canonical param registry  (edit when adding concepts)
-│   │   ├── base.py               ← TTSEngine ABC + EngineParam dataclass
-│   │   ├── registry.py           ← engine registration
-│   │   ├── chatterbox_adapter.py ← reference adapter implementation
-│   │   └── chatterbox_standalone/← vendored Chatterbox source (do not refactor)
+│   │   ├── canonical.py                ← canonical param registry  (edit when adding concepts)
+│   │   ├── base.py                     ← TTSEngine ABC + EngineParam dataclass
+│   │   ├── registry.py                 ← engine registration
+│   │   ├── chatterbox_adapter.py       ← reference adapter (uses vendored standalone)
+│   │   ├── chatterbox_turbo_adapter.py ← Turbo adapter (uses pip chatterbox-tts)
+│   │   └── chatterbox_standalone/      ← vendored Chatterbox source (do not refactor)
 │   ├── generate.py               ← engine-agnostic generate() API
 │   └── utils/                    ← folder_paths mock, downloaders, device utils
 ├── scripts/                      ← input .txt / .md files (user content)
@@ -107,7 +144,7 @@ Read4me/
 
 ---
 
-## 3. Dependency Rules
+## 4. Dependency Rules
 
 - Add every new Python dependency to `requirements.txt` with a minimum
   version pin (`>=`).  Never leave silent `ImportError` paths that the user
@@ -119,7 +156,7 @@ Read4me/
 
 ---
 
-## 4. TUI Conventions
+## 5. TUI Conventions
 
 - All layout heights must be explicit in `DEFAULT_CSS` (e.g. `height: 3`).
   Never rely on Textual's default `height: 1fr` for widgets inside
@@ -130,7 +167,7 @@ Read4me/
 
 ---
 
-## 5. Commit Style
+## 6. Commit Style
 
 - One logical change per commit.
 - Mention affected components in the subject line

@@ -50,3 +50,6 @@ def available_engines() -> list[tuple[str, str]]:
 
 from .chatterbox_adapter import ChatterboxAdapter  # noqa: E402
 register(ChatterboxAdapter)
+
+from .chatterbox_turbo_adapter import ChatterboxTurboAdapter  # noqa: E402
+register(ChatterboxTurboAdapter)

@@ -81,16 +81,18 @@ class ChatterboxAdapter(TTSEngine):
     # ------------------------------------------------------------------
 
     def load(self, device: str, **params) -> None:
+        from utils.device import resolve_torch_device
+        resolved = resolve_torch_device(device)
         language = params.get("language", "English")
         if (self._tts is not None
-                and self._loaded_device == device
+                and self._loaded_device == resolved
                 and self._loaded_language == language):
             return  # already loaded, skip
 
         from engines.chatterbox_standalone import ChatterboxTTS
-        print(f"Loading Chatterbox  language={language}  device={device}")
-        self._tts = ChatterboxTTS.from_pretrained(device, language=language)
-        self._loaded_device = device
+        print(f"Loading Chatterbox  language={language}  device={resolved}")
+        self._tts = ChatterboxTTS.from_pretrained(resolved, language=language)
+        self._loaded_device = resolved
         self._loaded_language = language
 
     def set_voice(self, voice_path: str, **params) -> None:

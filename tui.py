@@ -304,34 +304,31 @@ class Read4meApp(App):
 
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         from engines.registry import available_engines
         engines = available_engines()
         if engines:
-            self._refresh_engine_panel(engines[0][1])
+            await self._refresh_engine_panel(engines[0][1])
         self._dom_ready = True  # allow on_select_changed to act from here on
 
     # ── Engine panel ─────────────────────────────────────────────────────────
 
-    def _refresh_engine_panel(self, engine_name: str) -> None:
+    async def _refresh_engine_panel(self, engine_name: str) -> None:
         self._current_engine = engine_name
 
         from engines.registry import get_engine
         engine = get_engine(engine_name)
 
         panel = self.query_one("#bottom-panel")
-        try:
-            panel.remove_children()
-        except AttributeError:
-            for child in list(panel.children):
-                child.remove()
+        await panel.remove_children()
 
         # Show/hide voice rows depending on whether this engine needs one
         for w in self.query(".voice-row"):
             w.display = engine.requires_voice_file
 
-        for widget in self._build_param_widgets(engine):
-            panel.mount(widget)
+        widgets = self._build_param_widgets(engine)
+        if widgets:
+            await panel.mount(*widgets)
 
     def _build_param_widgets(self, engine) -> list:
         widgets: list = []
@@ -416,6 +413,8 @@ class Read4meApp(App):
         result: dict = {}
 
         for param in engine.params():
+            if param.id.startswith("_"):  # hint-only params (e.g. _tags_hint) — skip
+                continue
             widget_id = f"param-{param.id}"
             try:
                 if param.type == "select":
@@ -445,7 +444,7 @@ class Read4meApp(App):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    def on_select_changed(self, event: Select.Changed) -> None:
+    async def on_select_changed(self, event: Select.Changed) -> None:
         # Ignore events that fire during compose/mount before DOM is ready.
         # on_mount handles the initial render; we only act on genuine user changes.
         if not self._dom_ready:
@@ -453,7 +452,7 @@ class Read4meApp(App):
         if event.select.id == "engine-select" and event.value != Select.BLANK:
             new_engine = str(event.value)
             if new_engine != self._current_engine:
-                self._refresh_engine_panel(new_engine)
+                await self._refresh_engine_panel(new_engine)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id
