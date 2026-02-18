@@ -41,6 +41,7 @@ class ChatterboxAdapter(TTSEngine):
                 required=False,
                 description="Language model variant",
                 options=_LANGUAGES,
+                canonical="language",
             ),
             EngineParam(
                 id="exaggeration",
@@ -51,6 +52,7 @@ class ChatterboxAdapter(TTSEngine):
                 description="Emotion intensity  (0 – 1.5)",
                 min_val=0.0,
                 max_val=1.5,
+                canonical="emotion",
             ),
             EngineParam(
                 id="temperature",
@@ -61,6 +63,7 @@ class ChatterboxAdapter(TTSEngine):
                 description="Sampling randomness  (0.1 – 1.5)",
                 min_val=0.1,
                 max_val=1.5,
+                canonical="temperature",
             ),
             EngineParam(
                 id="cfg_weight",
@@ -71,6 +74,7 @@ class ChatterboxAdapter(TTSEngine):
                 description="Guidance strength  (0 – 1)",
                 min_val=0.0,
                 max_val=1.0,
+                canonical="guidance",
             ),
         ]
 

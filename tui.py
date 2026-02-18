@@ -302,14 +302,21 @@ class Read4meApp(App):
         return widgets
 
     def _build_param_row(self, param) -> list:
-        from engines.base import EngineParam
+        from engines.canonical import resolve as resolve_canonical
         widgets: list = []
         widget_id = f"param-{param.id}"
+
+        # Resolve canonical overrides for label / description / range
+        canon = resolve_canonical(param.canonical)
+        display_label = canon.label if canon else param.label
+        display_desc  = canon.description if canon else param.description
+        min_val = canon.min_val if (canon and canon.min_val is not None) else param.min_val
+        max_val = canon.max_val if (canon and canon.max_val is not None) else param.max_val
 
         # Label — ◆ prefix for required
         prefix = "◆  " if param.required else ""
         label_classes = "param-label" + (" required" if param.required else "")
-        widgets.append(Label(f"{prefix}{param.label}", classes=label_classes))
+        widgets.append(Label(f"{prefix}{display_label}", classes=label_classes))
 
         # Input widget
         if param.type == "select" and param.options:
@@ -323,8 +330,8 @@ class Read4meApp(App):
             )
         else:
             range_hint = (
-                f"  ({param.min_val} – {param.max_val})"
-                if param.min_val is not None and param.max_val is not None
+                f"  ({min_val} – {max_val})"
+                if min_val is not None and max_val is not None
                 else ""
             )
             placeholder = f"required{range_hint}" if param.required else range_hint.strip()
@@ -339,8 +346,8 @@ class Read4meApp(App):
             )
 
         # Description hint
-        if param.description:
-            widgets.append(Static(param.description, classes="param-desc"))
+        if display_desc:
+            widgets.append(Static(display_desc, classes="param-desc"))
 
         return widgets
 

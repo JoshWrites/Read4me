@@ -19,17 +19,24 @@ class EngineParam:
     """
     Describes a single configurable parameter for a TTS engine.
 
-    The TUI reads this list to build the right-hand settings panel dynamically.
+    The TUI reads this list to build the engine settings panel dynamically.
+
+    Set `canonical` to a key from `src/engines/canonical.CANONICAL` to opt
+    into the normalised label/description system.  The TUI will then display
+    the canonical label (e.g. "Speed") regardless of what the engine calls
+    this parameter internally (e.g. "pace", "rate", "speaking_rate"), keeping
+    the UI visually consistent as the user switches between engines.
     """
     id: str                            # kwarg key passed to generate_audio() / set_voice()
-    label: str                         # display name in TUI
+    label: str                         # fallback display name (used when canonical is None)
     type: Literal["float", "int", "str", "select"]
     default: Any                       # shown in the input field; None means required
     required: bool = False             # True → user MUST fill this in (shown with ◆ indicator)
-    description: str = ""              # one-line hint shown below the widget
+    description: str = ""              # fallback hint (used when canonical is None)
     options: list[tuple[str, str]] | None = None  # (display_label, value) for "select" type
     min_val: float | None = None
     max_val: float | None = None
+    canonical: str | None = None       # key into canonical.CANONICAL  e.g. "speed", "emotion"
 
 
 class TTSEngine(ABC):
