@@ -28,7 +28,7 @@ for _p in (_REPO_ROOT, _SRC):
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DirectoryTree, Footer, Header, Input, Label, Select, Static
 
@@ -135,7 +135,6 @@ class Read4meApp(App):
     /* Single scrollable column — nothing ever gets clipped */
     #main-scroll {
         height: 1fr;
-        overflow-y: auto;
     }
 
     /* Top panel: full-width global controls */
@@ -222,7 +221,8 @@ class Read4meApp(App):
         self._voice_path:  str | None = None
         self._output_dir:  str = _REPO_ROOT
         self._generating:  bool = False
-        self._current_engine: str | None = None  # guard against double-mount
+        self._current_engine: str | None = None
+        self._dom_ready: bool = False  # True only after on_mount — guards Select.Changed
 
     # ── Layout ───────────────────────────────────────────────────────────────
 
@@ -233,7 +233,7 @@ class Read4meApp(App):
 
         yield Header()
 
-        with Vertical(id="main-scroll"):
+        with VerticalScroll(id="main-scroll"):
 
             # ── Top panel — global controls ───────────────────────────────
             with Vertical(id="top-panel"):
@@ -285,30 +285,24 @@ class Read4meApp(App):
         engines = available_engines()
         if engines:
             self._refresh_engine_panel(engines[0][1])
+        self._dom_ready = True  # allow on_select_changed to act from here on
 
     # ── Engine panel ─────────────────────────────────────────────────────────
 
     def _refresh_engine_panel(self, engine_name: str) -> None:
-        # Textual fires Select.Changed when the initial value is set during
-        # compose, so on_mount and on_select_changed both call this for the
-        # same engine.  Skip the second call to avoid DuplicateIds errors.
-        if engine_name == self._current_engine:
-            return
         self._current_engine = engine_name
 
         from engines.registry import get_engine
         engine = get_engine(engine_name)
 
         panel = self.query_one("#bottom-panel")
-        # remove_children() is the synchronous Textual 8 API; fall back to
-        # iterating if the method isn't present on older builds.
         try:
             panel.remove_children()
         except AttributeError:
             for child in list(panel.children):
                 child.remove()
 
-        # Show/hide voice section based on engine capability
+        # Show/hide voice section depending on whether this engine needs one
         self.query_one("#voice-section").display = engine.requires_voice_file
 
         for widget in self._build_param_widgets(engine):
@@ -420,12 +414,14 @@ class Read4meApp(App):
     # ── Event handlers ────────────────────────────────────────────────────────
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        # Ignore events that fire during compose/mount before DOM is ready.
+        # on_mount handles the initial render; we only act on genuine user changes.
+        if not self._dom_ready:
+            return
         if event.select.id == "engine-select" and event.value != Select.BLANK:
             new_engine = str(event.value)
             if new_engine != self._current_engine:
-                # User picked a different engine — force the panel to rebuild
-                self._current_engine = None
-            self._refresh_engine_panel(new_engine)
+                self._refresh_engine_panel(new_engine)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id
