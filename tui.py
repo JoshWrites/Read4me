@@ -33,7 +33,6 @@ from textual.widgets import (
     Input,
     Label,
     Select,
-    Slider,
     Static,
 )
 
@@ -222,17 +221,16 @@ class Read4meApp(App):
         width: 12;
         margin-left: 1;
     }
-    .slider-row {
-        height: 5;
+    .param-row {
+        height: 3;
         margin-bottom: 1;
     }
-    .slider-label {
+    .param-label {
         width: 20;
         content-align: left middle;
     }
-    .slider-value {
-        width: 6;
-        content-align: right middle;
+    .param-input {
+        width: 10;
     }
     #main-scroll {
         height: 1fr;
@@ -294,26 +292,17 @@ class Read4meApp(App):
                 yield Label("Device", classes="slider-label")
                 yield Select(DEVICES, value="auto", id="device-select")
 
-            with Horizontal(classes="slider-row"):
-                yield Label("Exaggeration", classes="slider-label")
-                yield Slider(
-                    min=0.0, max=1.5, step=0.05, value=0.5, id="exaggeration-slider"
-                )
-                yield Static("0.50", id="exaggeration-val", classes="slider-value")
+            with Horizontal(classes="param-row"):
+                yield Label("Exaggeration  (0–1.5)", classes="param-label")
+                yield Input("0.5", id="exaggeration-input", classes="param-input")
 
-            with Horizontal(classes="slider-row"):
-                yield Label("Temperature", classes="slider-label")
-                yield Slider(
-                    min=0.1, max=1.5, step=0.05, value=0.8, id="temperature-slider"
-                )
-                yield Static("0.80", id="temperature-val", classes="slider-value")
+            with Horizontal(classes="param-row"):
+                yield Label("Temperature  (0.1–1.5)", classes="param-label")
+                yield Input("0.8", id="temperature-input", classes="param-input")
 
-            with Horizontal(classes="slider-row"):
-                yield Label("CFG Weight", classes="slider-label")
-                yield Slider(
-                    min=0.0, max=1.0, step=0.05, value=0.5, id="cfg-slider"
-                )
-                yield Static("0.50", id="cfg-val", classes="slider-value")
+            with Horizontal(classes="param-row"):
+                yield Label("CFG Weight  (0–1)", classes="param-label")
+                yield Input("0.5", id="cfg-input", classes="param-input")
 
             # Output directory
             yield Label("4. Output directory", classes="section-label")
@@ -333,18 +322,6 @@ class Read4meApp(App):
             yield Static("Ready.", id="status")
 
         yield Footer()
-
-    # ---- Slider sync -----------------------------------------------------
-
-    def on_slider_changed(self, event: Slider.Changed) -> None:
-        val = f"{event.value:.2f}"
-        mapping = {
-            "exaggeration-slider": "exaggeration-val",
-            "temperature-slider":  "temperature-val",
-            "cfg-slider":          "cfg-val",
-        }
-        if event.slider.id in mapping:
-            self.query_one(f"#{mapping[event.slider.id]}", Static).update(val)
 
     # ---- File/dir pickers ------------------------------------------------
 
@@ -427,11 +404,18 @@ class Read4meApp(App):
             return
 
         # Collect settings
-        language   = self.query_one("#language-select", Select).value
-        device     = self.query_one("#device-select", Select).value
-        exaggeration = float(self.query_one("#exaggeration-slider", Slider).value)
-        temperature  = float(self.query_one("#temperature-slider", Slider).value)
-        cfg_weight   = float(self.query_one("#cfg-slider", Slider).value)
+        language = self.query_one("#language-select", Select).value
+        device   = self.query_one("#device-select", Select).value
+
+        def _float(widget_id: str, default: float) -> float:
+            try:
+                return float(self.query_one(f"#{widget_id}", Input).value)
+            except (ValueError, TypeError):
+                return default
+
+        exaggeration = _float("exaggeration-input", 0.5)
+        temperature  = _float("temperature-input", 0.8)
+        cfg_weight   = _float("cfg-input", 0.5)
 
         voice_path = self._voice_path
         output_dir = self._output_dir
