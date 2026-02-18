@@ -44,7 +44,9 @@ def main() -> int:
     parser.add_argument("text",         nargs="?",  default=None)
     parser.add_argument("-f", "--text-file")
     parser.add_argument("-v", "--voice",  default=None)
-    parser.add_argument("-o", "--out-dir", default=".")
+    parser.add_argument("-o", "--out-dir", "--output-dir",
+                        default=os.path.join(_REPO_ROOT, "Output"),
+                        metavar="DIR")
     parser.add_argument("-n", "--filename", default="output.wav")
     parser.add_argument("-e", "--engine",  default="chatterbox")
     parser.add_argument("-d", "--device",  default="auto")

@@ -24,6 +24,7 @@ To add a new engine: see src/engines/registry.py.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 # Ensure repo root and src/ are on sys.path so engine and folder_paths imports resolve
@@ -32,6 +33,48 @@ _SRC = os.path.join(_REPO_ROOT, "src")
 for _p in (_REPO_ROOT, _SRC):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+# Maximum characters per chunk sent to the engine.
+# Chatterbox's T3 transformer has a finite context window; feeding it more
+# than ~200 words causes it to run out of tokens and loop its output.
+# At ~5 chars/word, 800 chars ≈ 160 words — comfortably inside the window.
+_CHUNK_CHARS = 800
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text on sentence boundaries, preserving whitespace."""
+    # Split after . ! ? followed by whitespace or end-of-string.
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _chunk_text(text: str, max_chars: int = _CHUNK_CHARS) -> list[str]:
+    """
+    Group sentences into chunks no longer than max_chars.
+
+    Each chunk ends at a sentence boundary so the engine never receives a
+    fragment mid-sentence.  A single sentence longer than max_chars is kept
+    whole — splitting mid-sentence produces unnatural speech.
+    """
+    sentences = _split_sentences(text)
+    chunks: list[str] = []
+    current = ""
+
+    for sentence in sentences:
+        candidate = (current + " " + sentence).strip() if current else sentence
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            # Start a new chunk.  If this single sentence exceeds max_chars,
+            # keep it whole — splitting mid-sentence sounds worse than long.
+            current = sentence
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 def generate(
@@ -45,6 +88,10 @@ def generate(
 ) -> str:
     """
     Synthesise speech and write a WAV file.
+
+    Long text is automatically split into sentence-boundary chunks and
+    generated separately, then concatenated into a single WAV.  A short
+    silence is inserted between chunks so the output sounds natural.
 
     Args:
         text:             Text to read aloud.
@@ -82,19 +129,33 @@ def generate(
     # Load model (adapter caches; skips if device+params unchanged)
     engine.load(device, **engine_params)
 
-    # Prepare voice
+    # Prepare voice (once — reused across all chunks)
     if engine.requires_voice_file:
         engine.set_voice(voice_path, **engine_params)
 
-    # Generate
-    audio, sr = engine.generate_audio(text, **engine_params)
+    # Split text into chunks to avoid model context-window looping
+    chunks = _chunk_text(text)
+    print(f"Generating {len(chunks)} chunk(s)  ({len(text)} chars total)")
 
-    # Normalise to 1-D float32 numpy array
-    if hasattr(audio, "cpu"):                          # torch.Tensor
-        audio = audio.squeeze().detach().cpu().numpy()
-    audio = np.asarray(audio, dtype=np.float32).squeeze()
+    audio_parts: list[np.ndarray] = []
+    sr: int = 24000  # will be set from first chunk
 
-    sf.write(out_path, audio, sr, subtype="FLOAT")
-    print(f"Saved: {out_path}  ({sr} Hz, {len(audio) / sr:.1f}s)")
+    for i, chunk in enumerate(chunks, 1):
+        print(f"  Chunk {i}/{len(chunks)}: {len(chunk)} chars")
+        audio, sr = engine.generate_audio(chunk, **engine_params)
+
+        # Normalise to 1-D float32 numpy array
+        if hasattr(audio, "cpu"):
+            audio = audio.squeeze().detach().cpu().numpy()
+        audio = np.asarray(audio, dtype=np.float32).squeeze()
+        audio_parts.append(audio)
+
+        # Add a short natural pause between chunks (0.3 s of silence)
+        if i < len(chunks):
+            audio_parts.append(np.zeros(int(sr * 0.3), dtype=np.float32))
+
+    full_audio = np.concatenate(audio_parts)
+    sf.write(out_path, full_audio, sr, subtype="FLOAT")
+    print(f"Saved: {out_path}  ({sr} Hz, {len(full_audio) / sr:.1f}s)")
 
     return out_path
