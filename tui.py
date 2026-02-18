@@ -137,17 +137,16 @@ class Read4meApp(App):
         height: 1fr;
     }
 
-    /* Top panel: full-width global controls */
-    #top-panel {
-        height: auto;
+    /* All content is a direct child of the VerticalScroll */
+    #main-scroll {
         padding: 1 3;
-        border-bottom: thick $panel-darken-2;
     }
 
-    /* Bottom panel: engine-specific settings */
-    #bottom-panel {
-        height: auto;
-        padding: 1 3;
+    .divider {
+        border-top: solid $panel-darken-2;
+        height: 1;
+        margin-top: 1;
+        margin-bottom: 1;
     }
 
     /* ── Shared ─────────────────────────────────────── */
@@ -233,48 +232,54 @@ class Read4meApp(App):
 
         yield Header()
 
+        # Everything is a flat direct child of VerticalScroll.
+        # No intermediate wrappers — avoids height-collapse bugs in Textual 8.
         with VerticalScroll(id="main-scroll"):
 
-            # ── Top panel — global controls ───────────────────────────────
-            with Vertical(id="top-panel"):
+            # ── Script ────────────────────────────────────────────────────
+            yield Label("Script", classes="section-label")
+            with Horizontal(classes="file-row"):
+                yield Static(
+                    "browse scripts/  →",
+                    id="script-display", classes="path-display unset",
+                )
+                yield Button("Browse", id="browse-script", classes="browse-btn")
 
-                yield Label("Script", classes="section-label")
+            # ── Voice (shown/hidden per engine) ───────────────────────────
+            with Vertical(id="voice-section"):
+                yield Label("Voice", classes="section-label")
                 with Horizontal(classes="file-row"):
                     yield Static(
-                        "browse scripts/  →",
-                        id="script-display", classes="path-display unset",
+                        "browse voices/  →",
+                        id="voice-display", classes="path-display unset",
                     )
-                    yield Button("Browse", id="browse-script", classes="browse-btn")
+                    yield Button("Browse", id="browse-voice", classes="browse-btn")
 
-                with Vertical(id="voice-section"):
-                    yield Label("Voice", classes="section-label")
-                    with Horizontal(classes="file-row"):
-                        yield Static(
-                            "browse voices/  →",
-                            id="voice-display", classes="path-display unset",
-                        )
-                        yield Button("Browse", id="browse-voice", classes="browse-btn")
+            # ── Engine + Device ───────────────────────────────────────────
+            with Horizontal(classes="eng-dev-row"):
+                with Vertical(classes="eng-dev-col"):
+                    yield Label("Engine", classes="section-label")
+                    yield Select(engines, value=default_engine, id="engine-select")
+                with Vertical(classes="eng-dev-col"):
+                    yield Label("Device", classes="section-label")
+                    yield Select(_DEVICES, value="auto", id="device-select")
 
-                # Engine and Device side by side
-                with Horizontal(classes="eng-dev-row"):
-                    with Vertical(classes="eng-dev-col"):
-                        yield Label("Engine", classes="section-label")
-                        yield Select(engines, value=default_engine, id="engine-select")
-                    with Vertical(classes="eng-dev-col"):
-                        yield Label("Device", classes="section-label")
-                        yield Select(_DEVICES, value="auto", id="device-select")
+            # ── Output Directory ──────────────────────────────────────────
+            yield Label("Output Directory", classes="section-label")
+            with Horizontal(classes="file-row"):
+                yield Static(
+                    _REPO_ROOT, id="outdir-display", classes="path-display",
+                )
+                yield Button("Browse", id="browse-outdir", classes="browse-btn")
 
-                yield Label("Output Directory", classes="section-label")
-                with Horizontal(classes="file-row"):
-                    yield Static(
-                        _REPO_ROOT, id="outdir-display", classes="path-display",
-                    )
-                    yield Button("Browse", id="browse-outdir", classes="browse-btn")
+            # ── Generate + Status ─────────────────────────────────────────
+            yield Button("⚡  Generate  [Ctrl+G]", id="generate-btn", variant="success")
+            yield Static("Ready.", id="status")
 
-                yield Button("⚡  Generate  [Ctrl+G]", id="generate-btn", variant="success")
-                yield Static("Ready.", id="status")
+            # ── Divider ───────────────────────────────────────────────────
+            yield Static("", classes="divider")
 
-            # ── Bottom panel — engine params (populated in on_mount) ───────
+            # ── Engine params (populated in on_mount) ─────────────────────
             with Vertical(id="bottom-panel"):
                 pass
 
