@@ -131,18 +131,24 @@ class Read4meApp(App):
 
     DEFAULT_CSS = """
     /* ── Overall layout ─────────────────────────────── */
-    #panels { height: 1fr; }
 
-    #left-panel {
-        width: 42;
-        border-right: solid $panel-darken-2;
-        padding: 1 2;
+    /* Single scrollable column — nothing ever gets clipped */
+    #main-scroll {
+        height: 1fr;
         overflow-y: auto;
     }
-    #right-panel {
-        width: 1fr;
-        padding: 1 2;
-        overflow-y: auto;
+
+    /* Top panel: full-width global controls */
+    #top-panel {
+        height: auto;
+        padding: 1 3;
+        border-bottom: thick $panel-darken-2;
+    }
+
+    /* Bottom panel: engine-specific settings */
+    #bottom-panel {
+        height: auto;
+        padding: 1 3;
     }
 
     /* ── Shared ─────────────────────────────────────── */
@@ -161,13 +167,16 @@ class Read4meApp(App):
         overflow: hidden;
     }
     .path-display.unset { color: $text-muted; }
-    .file-row { height: 3; margin-bottom: 1; }
+    .file-row  { height: 3; margin-bottom: 1; }
     .browse-btn { width: 10; margin-left: 1; }
 
-    /* ── Left panel specifics ────────────────────────── */
-    #engine-select { margin-bottom: 1; }
-    #device-select { margin-bottom: 1; }
-    #generate-btn  { width: 100%; height: 3; margin-top: 1; }
+    /* Engine + Device side-by-side row */
+    .eng-dev-row { height: auto; margin-bottom: 1; }
+    .eng-dev-col { width: 1fr; margin-right: 2; }
+    .eng-dev-col:last-of-type { margin-right: 0; }
+
+    /* ── Top panel specifics ─────────────────────────── */
+    #generate-btn { width: 100%; height: 3; margin-top: 1; }
     #status {
         height: 3;
         margin-top: 1;
@@ -177,11 +186,11 @@ class Read4meApp(App):
         content-align: left middle;
         color: $text-muted;
     }
-    #status.busy   { color: $warning; }
-    #status.done   { color: $success; }
-    #status.error  { color: $error; }
+    #status.busy  { color: $warning; }
+    #status.done  { color: $success; }
+    #status.error { color: $error; }
 
-    /* ── Right panel — engine params ─────────────────── */
+    /* ── Bottom panel — engine params ────────────────── */
     .engine-title {
         text-style: bold;
         color: $accent;
@@ -199,12 +208,9 @@ class Read4meApp(App):
         margin-top: 1;
         margin-bottom: 0;
     }
-    .param-label         { margin-top: 1; }
+    .param-label          { margin-top: 1; }
     .param-label.required { color: $error; text-style: bold; }
-    .param-desc {
-        color: $text-muted;
-        margin-bottom: 0;
-    }
+    .param-desc  { color: $text-muted; margin-bottom: 0; }
     .param-input  { margin-bottom: 0; }
     .param-select { margin-bottom: 0; }
     .no-params    { color: $text-muted; margin-top: 1; }
@@ -225,10 +231,12 @@ class Read4meApp(App):
         default_engine = engines[0][1] if engines else ""
 
         yield Header()
-        with Horizontal(id="panels"):
 
-            # ── Left panel ────────────────────────────────────────────────
-            with Vertical(id="left-panel"):
+        with Vertical(id="main-scroll"):
+
+            # ── Top panel — global controls ───────────────────────────────
+            with Vertical(id="top-panel"):
+
                 yield Label("Script", classes="section-label")
                 with Horizontal(classes="file-row"):
                     yield Static(
@@ -246,11 +254,14 @@ class Read4meApp(App):
                         )
                         yield Button("Browse", id="browse-voice", classes="browse-btn")
 
-                yield Label("Engine", classes="section-label")
-                yield Select(engines, value=default_engine, id="engine-select")
-
-                yield Label("Device", classes="section-label")
-                yield Select(_DEVICES, value="auto", id="device-select")
+                # Engine and Device side by side
+                with Horizontal(classes="eng-dev-row"):
+                    with Vertical(classes="eng-dev-col"):
+                        yield Label("Engine", classes="section-label")
+                        yield Select(engines, value=default_engine, id="engine-select")
+                    with Vertical(classes="eng-dev-col"):
+                        yield Label("Device", classes="section-label")
+                        yield Select(_DEVICES, value="auto", id="device-select")
 
                 yield Label("Output Directory", classes="section-label")
                 with Horizontal(classes="file-row"):
@@ -262,8 +273,8 @@ class Read4meApp(App):
                 yield Button("⚡  Generate  [Ctrl+G]", id="generate-btn", variant="success")
                 yield Static("Ready.", id="status")
 
-            # ── Right panel — populated in on_mount ───────────────────────
-            with Vertical(id="right-panel"):
+            # ── Bottom panel — engine params (populated in on_mount) ───────
+            with Vertical(id="bottom-panel"):
                 pass
 
         yield Footer()
@@ -280,7 +291,7 @@ class Read4meApp(App):
         from engines.registry import get_engine
         engine = get_engine(engine_name)
 
-        panel = self.query_one("#right-panel")
+        panel = self.query_one("#bottom-panel")
         for child in list(panel.children):
             child.remove()
 
