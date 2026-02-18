@@ -17,6 +17,12 @@ import sys
 import threading
 from pathlib import Path
 
+# Prevent HuggingFace tokenizer and OpenMP from forking worker processes.
+# When running inside Textual's event loop those forks inherit the terminal
+# file descriptors and fail with "bad value(s) in fds_to_keep" on Python 3.12+.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.join(_REPO_ROOT, "src")
 _SCRIPTS_DIR = os.path.join(_REPO_ROOT, "scripts")
@@ -496,6 +502,11 @@ class Read4meApp(App):
         self.query_one("#generate-btn", Button).disabled = True
 
         def _run() -> None:
+            # Ensure subprocess-forking libraries stay single-threaded inside
+            # the Textual event loop (belt-and-suspenders alongside the module-
+            # level os.environ.setdefault calls at the top of this file).
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            os.environ["OMP_NUM_THREADS"] = "1"
             try:
                 from src.generate import generate
                 out = generate(
@@ -507,6 +518,16 @@ class Read4meApp(App):
                     **engine_params,
                 )
                 self.call_from_thread(self._on_generation_done, out, None)
+            except ValueError as exc:
+                # "bad value(s) in fds_to_keep" and similar process-spawn errors
+                if "fds_to_keep" in str(exc):
+                    msg = (
+                        "Subprocess fork conflict — model loaded but generation "
+                        "failed.  Try running: python text_to_speech.py instead."
+                    )
+                else:
+                    msg = str(exc)
+                self.call_from_thread(self._on_generation_done, None, msg)
             except Exception as exc:  # noqa: BLE001
                 self.call_from_thread(self._on_generation_done, None, str(exc))
 
