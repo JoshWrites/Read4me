@@ -1,0 +1,52 @@
+---
+description: Checklist for adding a new TTS engine adapter to Read4me
+globs: src/engines/**/*.py
+alwaysApply: false
+---
+
+# Adding a New TTS Engine
+
+## 1. Audit canonical.py FIRST
+
+Open `src/engines/canonical.py` before writing any `EngineParam`.
+Map every engine param to an existing canonical where one fits:
+
+| Concept | canonical= |
+|---------|-----------|
+| rate / pace / speed | `"speed"` |
+| pitch / tone | `"pitch"` |
+| loudness / gain | `"volume"` |
+| emotion / exaggeration / expressiveness | `"emotion"` |
+| randomness / variability / creativity | `"temperature"` |
+| CFG / guidance scale | `"guidance"` |
+| seed / reproducibility | `"seed"` |
+| language / locale / variant | `"language"` |
+
+Only add a new `CanonicalParam` to the registry when the concept is
+genuinely absent. New canonicals should be rare.
+
+## 2. EngineParam pattern
+
+```python
+EngineParam(
+    id="pace",           # kwarg sent to generate_audio() — keep engine-native
+    label="Pace",        # fallback if canonical lookup fails
+    type="float",
+    default=1.0,
+    min_val=0.1,
+    max_val=3.0,
+    canonical="speed",   # ← user always sees "Speed"
+)
+```
+
+## 3. Register the adapter
+
+```python
+# src/engines/registry.py
+from .my_engine_adapter import MyEngineAdapter
+register(MyEngineAdapter)
+```
+
+## 4. Update requirements.txt
+
+Add every new dependency with a `>=` version pin.
