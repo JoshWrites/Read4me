@@ -133,8 +133,8 @@ def generate(
     if engine.requires_voice_file:
         engine.set_voice(voice_path, **engine_params)
 
-    # Split text into chunks to avoid model context-window looping
-    chunks = _chunk_text(text)
+    # Split text into chunks sized for this engine's context window
+    chunks = _chunk_text(text, max_chars=engine.chunk_chars)
     print(f"Generating {len(chunks)} chunk(s)  ({len(text)} chars total)")
 
     audio_parts: list[np.ndarray] = []

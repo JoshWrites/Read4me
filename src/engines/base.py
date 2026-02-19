@@ -53,6 +53,9 @@ class TTSEngine(ABC):
     name: str = ""           # unique slug  e.g. "chatterbox"
     display_name: str = ""   # shown in TUI e.g. "Chatterbox"
     requires_voice_file: bool = True  # False for engines with built-in voices
+    # Maximum characters per chunk sent to generate_audio().
+    # Engines with tighter context windows should set a smaller value.
+    chunk_chars: int = 800
 
     @classmethod
     @abstractmethod

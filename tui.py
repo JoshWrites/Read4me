@@ -37,6 +37,15 @@ def _worker_main(job_q: "_mp.Queue[dict | None]",
                  result_q: "_mp.Queue[dict]",
                  repo_root: str) -> None:
     """Entry point for the generation worker process."""
+    # Redirect all output to a log file so the worker's print() calls
+    # never write to the raw terminal FD that Textual is controlling.
+    # Without this, progress bars and model-loading messages corrupt the
+    # TUI display and make it appear frozen.
+    _log_path = os.path.join(repo_root, "generation.log")
+    _log = open(_log_path, "a", buffering=1)
+    sys.stdout = _log
+    sys.stderr = _log
+
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ["OMP_NUM_THREADS"] = "1"
     sys.path.insert(0, repo_root)
@@ -58,9 +67,16 @@ def _worker_main(job_q: "_mp.Queue[dict | None]",
 
 # Queues and process are created at import time but the process is not
 # started until main() so that 'spawn' forks before Textual touches the FDs.
+#
+# WHY SimpleQueue?
+# multiprocessing.Queue has an internal feeder thread.  On exit Python's
+# atexit handlers try to flush / join that thread, which can block forever
+# if the worker process is still alive but no longer draining the pipe.
+# SimpleQueue writes directly to the pipe with no background thread, so
+# there is nothing to flush and exit is always immediate.
 _mp_ctx   = _mp.get_context("spawn")
-_job_q    = _mp_ctx.Queue()
-_result_q = _mp_ctx.Queue()
+_job_q    = _mp_ctx.SimpleQueue()
+_result_q = _mp_ctx.SimpleQueue()
 _gen_worker: "_mp.Process | None" = None   # started in main()
 
 
@@ -207,6 +223,9 @@ class Read4meApp(App):
     .eng-dev-row { height: 6; margin-bottom: 1; }
     .eng-dev-col { width: 1fr; height: 6; }
 
+    /* Output filename input */
+    #output-filename { height: 3; margin-bottom: 1; }
+
     /* Generate button and status */
     #generate-btn { width: 100%; height: 3; margin-top: 1; }
     #status {
@@ -290,6 +309,14 @@ class Read4meApp(App):
                     _OUTPUT_DIR, id="outdir-display", classes="path-display",
                 )
                 yield Button("Browse", id="browse-outdir", classes="browse-btn")
+
+            # ── Output Filename ───────────────────────────────────────────
+            yield Label("Output Filename", classes="section-label")
+            yield Input(
+                value="output",
+                placeholder="output  (without .wav)",
+                id="output-filename",
+            )
 
             # ── Generate + Status ─────────────────────────────────────────
             yield Button("⚡  Generate  [Ctrl+G]", id="generate-btn", variant="success")
@@ -544,8 +571,10 @@ class Read4meApp(App):
         device = str(device_val) if device_val != Select.BLANK else "auto"
 
         # Snapshot mutable state before handing off to the thread
-        voice_path = self._voice_path
-        output_dir = self._output_dir
+        voice_path  = self._voice_path
+        output_dir  = self._output_dir
+        raw_fname   = self.query_one("#output-filename", Input).value.strip()
+        output_filename = (raw_fname or "output") + ".wav"
 
         self._generating = True
         self._set_status("Generating…  this may take a while.", kind="busy")
@@ -559,6 +588,7 @@ class Read4meApp(App):
                 "text": text,
                 "voice_path": voice_path,
                 "output_dir": output_dir,
+                "output_filename": output_filename,
                 "engine_name": engine_name,
                 "device": device,
                 **engine_params,
@@ -573,11 +603,37 @@ class Read4meApp(App):
 
     def _on_generation_done(self, out_path: str | None, error: str | None) -> None:
         self._generating = False
-        self.query_one("#generate-btn", Button).disabled = False
+        btn = self.query_one("#generate-btn", Button)
+        btn.disabled = False
+        btn.label = "⚡  Generate  [Ctrl+G]"
         if error:
             self._set_status(f"Error: {error}", kind="error")
         else:
-            self._set_status(f"Done →  {out_path}", kind="done")
+            self._set_status(f"✔  Saved →  {out_path}    (ready for next)", kind="done")
+            self._bump_output_filename()
+
+    def _bump_output_filename(self) -> None:
+        """Increment the filename suffix so the next generation won't overwrite."""
+        import re
+        inp = self.query_one("#output-filename", Input)
+        name = inp.value.strip() or "output"
+        m = re.match(r"^(.*?)(\d+)$", name)
+        if m:
+            new_name = m.group(1) + str(int(m.group(2)) + 1)
+        else:
+            new_name = name + "_2"
+        inp.value = new_name
+
+    def action_quit(self) -> None:
+        """Shut down the worker process before exiting so nothing blocks atexit."""
+        try:
+            _job_q.put(None)          # polite shutdown signal
+        except Exception:
+            pass
+        if _gen_worker and _gen_worker.is_alive():
+            _gen_worker.terminate()
+            _gen_worker.join(timeout=2)
+        self.exit()
 
     def _set_status(self, msg: str, kind: str = "") -> None:
         w = self.query_one("#status", Static)

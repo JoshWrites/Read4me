@@ -28,6 +28,12 @@ class ChatterboxTurboAdapter(TTSEngine):
     name = "chatterbox-turbo"
     display_name = "Chatterbox Turbo"
     requires_voice_file = True
+    # Turbo's GPT2-medium backbone has a 1024-token context window shared
+    # between: 375 conditioning tokens + text tokens + generated speech tokens.
+    # At ~4.5 chars/token and ~16 speech tokens/second, 400 chars ≈ 90 text
+    # tokens, leaving ~560 speech token budget ≈ 35 seconds — safely above
+    # the ~32 seconds a 400-char chunk of natural speech actually takes.
+    chunk_chars: int = 400
 
     def __init__(self) -> None:
         self._tts = None
@@ -139,5 +145,10 @@ class ChatterboxTurboAdapter(TTSEngine):
             exaggeration=float(params.get("exaggeration", 0.5)),
             cfg_weight=float(params.get("cfg_weight", 0.0)),
             temperature=float(params.get("temperature", 0.8)),
+            # repetition_penalty=1.2 (library default) progressively suppresses
+            # phoneme tokens that have already appeared.  Natural speech constantly
+            # reuses the same sounds, so the penalty causes increasing silence and
+            # stuttering as generation proceeds.  Disable it for clean output.
+            repetition_penalty=1.0,
         )
         return audio, self._tts.sr
